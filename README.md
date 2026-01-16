@@ -7,8 +7,7 @@
 
 An advanced Human-Computer Interaction (HCI) system that bridges the gap between AI perception and OS-level execution. This project is not just a script; it's a full-cycle engineering effort from real-time landmark inference to adaptive signal processing for system control.
 
----![جيف للتحكم.gif](..%2F..%2FDownloads%2F%3F%3F%3F%20%3F%3F%3F%3F%3F%3F.gif)
-
+https://s2.ezgif.com/tmp/ezgif-2fecfe1e7e6d0474.gif
 
 
 ## 🏗️ Engineering Lifecycle & Effort
