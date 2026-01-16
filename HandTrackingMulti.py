@@ -7,18 +7,22 @@ from ctypes import cast, POINTER
 from comtypes import CLSCTX_ALL
 from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
 
-# =========================
-# إعداد التحكم بالصوت
-# =========================
+# =================================================================
+# AUDIO INTERFACE CONFIGURATION
+# Using Pycaw to access system volume controls
+# =================================================================
+print("[INFO] Initializing Audio Interface...")
 devices = AudioUtilities.GetSpeakers()
 interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
 volume = cast(interface, POINTER(IAudioEndpointVolume))
 vol_min, vol_max = volume.GetVolumeRange()[:2]
+print("[SUCCESS] Audio Interface Ready.")
 
-
-# =========================
-# Mediapipe Hand Tracking
-# =========================
+# =================================================================
+# MEDIAPIPE HANDS INITIALIZATION
+# static_image_mode=False for video stream processing
+# =================================================================
+print("[INFO] Loading Mediapipe Hand Tracking Model...")
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(
     static_image_mode=False,
@@ -27,132 +31,152 @@ hands = mp_hands.Hands(
     min_tracking_confidence=0.7
 )
 mp_draw = mp.solutions.drawing_utils
+print("[SUCCESS] Model Loaded. Starting Camera...")
 
 cap = cv2.VideoCapture(0)
-tip_ids = [4, 8, 12, 16, 20]
+tip_ids = [4, 8, 12, 16, 20]  # Landmarks for Thumb, Index, Middle, Ring, Pinky
 finger_names = ["Thumb", "Index", "Middle", "Ring", "Pinky"]
 
-# =========================
-# Variables
-# =========================
-freeze_frame = None
+# Variables for state and UI management
 hand_open_start_time = None
 laser_coords = []
+last_status = ""
+vol_bar = 400
+vol_percent = 0
 
 while True:
-    if freeze_frame is None:
-        success, img = cap.read()
-        if not success: break
-        img = cv2.flip(img, 1)
-    else:
-        img = freeze_frame.copy()
+    success, img = cap.read()
+    if not success:
+        print("[ERROR] Could not read from webcam.")
+        break
 
+    img = cv2.flip(img, 1)  # Mirror for natural interaction
+    h, w, _ = img.shape
     img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     results = hands.process(img_rgb)
 
-    pause_video = False
     status_text = "IDLE"
+    pause_video = False
     active_fingers_info = ""
+    current_finger_count = 0
 
     if results.multi_hand_landmarks:
         for handLms in results.multi_hand_landmarks:
             lm_list = []
-            h, w, _ = img.shape
             for lm in handLms.landmark:
+                # Convert normalized coordinates to pixel values
                 lm_list.append((int(lm.x * w), int(lm.y * h)))
+
+            # HANDEDNESS DETECTION: Identifies Left vs Right hand
             hand_label = results.multi_handedness[results.multi_hand_landmarks.index(handLms)].classification[0].label
-            # --------- Count Fingers & Names ---------
+
             fingers = []
             open_names = []
 
-            # 1. منطق الإبهام حسب نوع اليد (Thumb Logic)
-            if hand_label == "Left":  # اليد اليسار
+            # THUMB LOGIC: Adjusted based on hand side (X-axis comparison)
+            if hand_label == "Left":
                 if lm_list[tip_ids[0]][0] > lm_list[tip_ids[0] - 1][0]:
                     fingers.append(1)
-                    open_names.append(f"{finger_names[0]}(4)")
+                    open_names.append(f"{finger_names[0]}")
                 else:
                     fingers.append(0)
-            else:  # اليد اليمين (Right)
+            else:
                 if lm_list[tip_ids[0]][0] < lm_list[tip_ids[0] - 1][0]:
                     fingers.append(1)
-                    open_names.append(f"{finger_names[0]}(4)")
+                    open_names.append(f"{finger_names[0]}")
                 else:
                     fingers.append(0)
 
-            # 2. باقي الأصابع (نفس منطقك العمودي)
+            # VERTICAL FINGERS LOGIC: Compares tip Y-coordinate with PIP joint
             for id in range(1, 5):
                 if lm_list[tip_ids[id]][1] < lm_list[tip_ids[id] - 2][1]:
                     fingers.append(1)
-                    open_names.append(f"{finger_names[id]}({tip_ids[id]})")
+                    open_names.append(f"{finger_names[id]}")
                 else:
                     fingers.append(0)
 
             active_fingers_info = ", ".join(open_names)
-            x2, y2 = lm_list[8]
+            current_finger_count = fingers.count(1)
+            x2, y2 = lm_list[8]  # Index tip (Landmark 8)
 
-            # --------- Volume Control (2 Fingers) ----------
-            if fingers.count(1) == 2:
-                if fingers[0] == 1 and fingers[1] == 1:
-                    x1, y1 = lm_list[4]
-                    length = math.hypot(x2 - x1, y2 - y1)
-                    vol = np.interp(length, [30, 200], [vol_min, vol_max])
-                    volume.SetMasterVolumeLevel(vol, None)
+            # ---------------- GESTURE PROCESSING ----------------
 
-                    cv2.line(img, (x1, y1), (x2, y2), (255, 0, 255), 3)
-                    cv2.circle(img, (x1, y1), 8, (255, 0, 255), -1)
-                    cv2.circle(img, (x2, y2), 8, (255, 0, 255), -1)
+            # 1. VOLUME CONTROL: Triggered by Thumb (0) and Index (1)
+            if current_finger_count == 2 and fingers[0] == 1 and fingers[1] == 1:
+                x1, y1 = lm_list[4]  # Thumb tip
+                length = math.hypot(x2 - x1, y2 - y1)  # Euclidean distance
+                vol = np.interp(length, [30, 200], [vol_min, vol_max])
+                volume.SetMasterVolumeLevel(vol, None)
+                status_text = "VOLUME CONTROL"
 
-                    vol_bar = np.interp(length, [30, 200], [400, 150])
-                    vol_percent = np.interp(length, [30, 200], [0, 100])
-                    cv2.rectangle(img, (50, 150), (85, 400), (200, 200, 200), 2)
-                    cv2.rectangle(img, (50, int(vol_bar)), (85, 400), (0, 255, 0), -1)
-                    cv2.putText(img, f'{int(vol_percent)} %', (40, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
-                    status_text = "VOLUME CONTROL"
+                # UI feedback for volume
+                vol_bar = np.interp(length, [30, 200], [400, 150])
+                vol_percent = int(np.interp(length, [30, 200], [0, 100]))
+                cv2.line(img, (x1, y1), (x2, y2), (255, 0, 255), 3)
+                cv2.circle(img, (x1, y1), 8, (255, 0, 255), -1)
+                cv2.circle(img, (x2, y2), 8, (255, 0, 255), -1)
 
-            # --------- Pause/Exit Logic (5 Fingers) ----------
-            if fingers.count(1) == 5:
+            # 2. EXIT TIMER: Triggered by 5 fingers open for a duration
+            elif current_finger_count == 5:
                 if hand_open_start_time is None:
                     hand_open_start_time = time.time()
-                elif time.time() - hand_open_start_time >= 5:
+
+                elapsed_time = int(time.time() - hand_open_start_time)
+                status_text = f"EXITING IN {5 - elapsed_time}s"
+
+                if elapsed_time >= 5:
+                    print("[SHUTDOWN] Program terminated by gesture.")
                     cap.release()
                     cv2.destroyAllWindows()
                     exit()
                 pause_video = True
-                status_text = "EXITING..."
-            else:
-                hand_open_start_time = None
 
-            # --------- Laser Draw Logic (1 Finger) ----------
-            if fingers.count(1) == 1:
+            # 3. LASER DRAWING: Only Index finger active
+            elif current_finger_count == 1 and fingers[1] == 1:
                 laser_coords.append((x2, y2))
-                if len(laser_coords) > 15:
-                    laser_coords.pop(0)
-                for i in range(1, len(laser_coords)):
-                    cv2.line(img, laser_coords[i - 1], laser_coords[i], (0, 0, 255), 3)
+                if len(laser_coords) > 15: laser_coords.pop(0)  # Maintain trail length
                 status_text = "LASER"
 
-            if fingers.count(1) == 0:
+            # 4. MUTE: All fingers closed (Fist)
+            elif current_finger_count == 0:
                 volume.SetMute(1, None)
                 status_text = "MUTED"
+
             else:
+                hand_open_start_time = None
                 volume.SetMute(0, None)
 
+            # RUNTIME CONSOLE LOGGING (Prints only on state change)
+            if status_text != last_status:
+                print(f"[EVENT] Mode: {status_text} | Fingers: {current_finger_count} ({active_fingers_info})")
+                last_status = status_text
 
+            # Visualizing hand skeleton
             mp_draw.draw_landmarks(img, handLms, mp_hands.HAND_CONNECTIONS)
+
+            # Drawing laser trail
+            for i in range(1, len(laser_coords)):
+                cv2.line(img, laser_coords[i - 1], laser_coords[i], (0, 0, 255), 3)
     else:
+        if last_status != "NO HAND":
+            print("[WARN] Tracking lost.")
+            last_status = "NO HAND"
         hand_open_start_time = None
 
-
-    # --------- Display Info on Screen ---------
+    # --------- ONSCREEN DASHBOARD (UI) ---------
     cv2.putText(img, f'STATUS: {status_text}', (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-    cv2.putText(img, f'FINGERS: {fingers.count(1) if results.multi_hand_landmarks else 0}', (10, 90),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(img, f'FINGERS: {current_finger_count}', (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     cv2.putText(img, f'OPEN: {active_fingers_info}', (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
 
-    if pause_video:
-        cv2.putText(img, "PAUSED", (200, 250), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 4)
+    # Graphical Volume Bar
+    cv2.rectangle(img, (50, 150), (85, 400), (200, 200, 200), 2)
+    cv2.rectangle(img, (50, int(vol_bar)), (85, 400), (0, 255, 0), -1)
+    cv2.putText(img, f'{int(vol_percent)} %', (40, 430), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-    cv2.imshow("Hand Volume Control", img)
+    if pause_video:
+        cv2.putText(img, "PAUSED / EXITING", (150, 250), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
+
+    cv2.imshow("Advanced Hand Control System", img)
     if cv2.waitKey(1) & 0xFF == 27: break
 
 cap.release()
