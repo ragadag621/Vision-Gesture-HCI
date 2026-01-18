@@ -8,7 +8,7 @@
 An advanced Human-Computer Interaction (HCI) system that bridges the gap between AI perception and OS-level execution. This project is not just a script; it's a full-cycle engineering effort from real-time landmark inference to adaptive signal processing for system control.
 
 <p align="center">
-  <img src="./assets/lasercontrol.jpeg" alt="GestureSense Demo" width="100%" />
+  <img src="./assets/HandMPDemo.gif" alt="GestureSense Demo" width="100%" />
 </p>
 <p align="center"><i>Control your computer with hand gestures in real-time!</i></p>
 
