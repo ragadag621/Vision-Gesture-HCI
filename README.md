@@ -239,12 +239,3 @@ This project is open-source and available under the MIT License.
 * **OpenCV** community for computer vision infrastructure
 * **PyCaw** developers for Windows audio control library
 
----
-
-## 📹 Demo Video
-
-*Coming soon! Stay tuned for a full video demonstration.*
-
-<!-- If you have a demo video, add it here:
-[![Demo Video](https://img.youtube.com/vi/YOUR_VIDEO_ID/0.jpg)](https://www.youtube.com/watch?v=YOUR_VIDEO_ID)
--->
